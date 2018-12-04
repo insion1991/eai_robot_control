@@ -29,7 +29,7 @@ public:
     void excute_linear();
     void publishRobotState(const ros::TimerEvent&);
     int getRobotState();
-    void move_linear_with_adjust(float linear_distance,float angle_adjust);
+    bool move_linear_with_adjust(float linear_distance,float angle_adjust);
     void excute_linear_with_adjust();
     float getCurrentImuAngle();
     bool run_straight_line(geometry_msgs::Pose start_pose,geometry_msgs::Pose target_pose);
@@ -67,8 +67,6 @@ private:
 
     bool laserPauseSwitch;
 
-
-
 public:
     enum RunState
     {
@@ -80,7 +78,5 @@ public:
         CANCEL        = 5
     }robot_state,last_robot_state;
     bool excuteState;
-
-
 
 };

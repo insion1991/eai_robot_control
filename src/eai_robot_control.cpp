@@ -50,6 +50,11 @@ RobotControl::RobotControl()
     //ros::waitForShutdown();
 }
 
+/*
+*作用：激光雷达已经检测到前方有障碍物，机器人已经停止，robot_state为PAUSE状态
+* 此时通过定时器，每5s 检测一次，前方是否还有障碍物，如果没有，就把机器人状态改变为
+* 之前的状态(行走或转动)。
+*/
 void RobotControl::laserChangeRobotState(const ros::TimerEvent&)
 {
 
@@ -60,6 +65,10 @@ void RobotControl::laserChangeRobotState(const ros::TimerEvent&)
     }
 }
 
+/*
+*作用：通过激光雷达，判断机器人前方范围是否有障碍物，如果有，设置开关为true，
+* 具体范围在dashgo_tools/conf/box_filter.yaml文件中设置
+*/
 void RobotControl::laserPauseCallback(const std_msgs::Int16::ConstPtr &msg)
 {
     //cout<<"in laserPauseCallback, "<<msg->data<<endl;
@@ -74,6 +83,9 @@ void RobotControl::laserPauseCallback(const std_msgs::Int16::ConstPtr &msg)
     }
 }
 
+/*
+*作用：通过定时器，每0.1s 发布一次机器人当前状态到"/robot_state"主题中
+*/
 void RobotControl::publishRobotState(const ros::TimerEvent&)
 {
     //cout<<"***robot state ="<<robot_state<<endl;
@@ -82,6 +94,10 @@ void RobotControl::publishRobotState(const ros::TimerEvent&)
     robot_state_pub.publish(st);
 }
 
+/*
+*作用：回调函数，更新imu角度值，并根据机器人状态1判断是否需要转动，
+*     并依靠imu角度值来计算是否转动完成。
+*/
 void RobotControl::getImuCallback(const std_msgs::Float32::ConstPtr& msg)
 {
     current_robot_angel=msg->data;
@@ -92,6 +108,10 @@ void RobotControl::getImuCallback(const std_msgs::Float32::ConstPtr& msg)
     }
 }
 
+/*
+*作用：回调函数，更新odom 的值，并根据机器人状态判断是否需要执行行走，
+*     并依靠里程计odom 的值来计算是否行走了特定距离
+*/
 void RobotControl::getOdomCallback(const nav_msgs::Odometry::ConstPtr& data)
 {
     current_odom=*data;
@@ -107,7 +127,10 @@ void RobotControl::getOdomCallback(const nav_msgs::Odometry::ConstPtr& data)
 
 }
 
-
+/*
+*作用：回调函数，从"move_fixed"主题中接收Twist消息，获取到需要转动的角度和行走的距离，然后
+*     先转动，后行走直线
+*/
 void RobotControl::moveCmdCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
     ros::Rate r(10);
@@ -156,6 +179,10 @@ void RobotControl::moveCmdCallback(const geometry_msgs::Twist::ConstPtr& msg)
 
 }
 
+/*
+*作用：计算实际转动的角度，需要注意3.14～-3.14 这一个临界值
+*
+*/
 float RobotControl::real_turn_angle(float turn_angle)
 {
     turn_angle=fmod(fmod(turn_angle, 2*M_PI)+ 2*M_PI, 2*M_PI);
@@ -175,6 +202,15 @@ float RobotControl::real_turn_angle(float turn_angle)
 
 }
 
+/*
+*作用：转动特定角度，靠陀螺仪来计算
+*参数：
+* angle  需要转动的角度，单位弧度，角度为正，则角速度为正，逆时针转，角度增大;
+*        角度为负，则角速度为负，顺时针转，角度减小
+*
+* 返回：执行完成返回true
+*
+*/
 bool RobotControl::move_rotate(float angle)
 {
     cout<<"in RobotControl move_rotate"<<endl;
@@ -182,9 +218,24 @@ bool RobotControl::move_rotate(float angle)
     target_angle=remain_turn_angle;
     count=0;
     robot_state=ROTATION;
-    return true;
+    while(ros::ok())
+    {
+        if(getRobotState() ==STOP)
+        {
+            //cout<<"excute complate"<<endl;
+            return true;
+        }
+        ros::spinOnce();
+    }
 }
 
+/*
+*作用：对外接口，接受行走距离，走直线，不带校准，误差在1cm
+*参数：
+* linear_distance  行走距离
+* 返回：执行完成返回true
+*
+*/
 bool RobotControl::move_linear(float linear_distance)
 {
     cout<<"int RobotControl move_linear"<<endl;
@@ -192,17 +243,45 @@ bool RobotControl::move_linear(float linear_distance)
     remain_distance=linear_distance;
     count=0;
     robot_state=LINEAR;
+    while(ros::ok())
+    {
+        if(getRobotState() ==STOP)
+        {
+            //cout<<"excute complate"<<endl;
+            return true;
+        }
+        ros::spinOnce();
+    }
 }
 
-void RobotControl::move_linear_with_adjust(float linear_distance,float angle)
+/*
+*作用：对外接口，接受行走距离和标准角度(行走时，以此角度为标准校正，误差在3度以内)，
+*参数：
+* linear_distance  行走距离
+* angle            此角度为标准校正，误差在正负3度以内
+* 返回：执行完成返回true
+*/
+bool RobotControl::move_linear_with_adjust(float linear_distance,float angle)
 {
     target_distance=linear_distance;
     remain_distance=linear_distance;
     angle_adjust=angle;
     count=0;
     robot_state=LINEAR_ADJUST;
+    while(ros::ok())
+    {
+        if(getRobotState() ==STOP)
+        {
+            //cout<<"excute complate"<<endl;
+            return true;
+        }
+        ros::spinOnce();
+    }
 }
-
+/*
+*作用：执行转动特定角度动作，角度为正，角速度为正，逆时针转，角度增大;
+*     角度为负，角速度为负，顺时针转，角度减小
+*/
 void RobotControl::excute_rotate()
 {
     if(count==0)
@@ -271,6 +350,9 @@ void RobotControl::excute_rotate()
 
 }
 
+/*
+*作用：执行不带校准走直线动作
+*/
 void RobotControl::excute_linear()
 {
     if(count==0)
@@ -335,6 +417,9 @@ void RobotControl::excute_linear()
     }
 }
 
+/*
+*作用：执行带校准的直线动作
+*/
 void RobotControl::excute_linear_with_adjust()
 {
     if(count==0)
@@ -422,6 +507,9 @@ void RobotControl::excute_linear_with_adjust()
     }
 }
 
+/*
+*作用：给定起点和目标点坐标，两点之间，走直线
+*/
 bool RobotControl::run_straight_line(geometry_msgs::Pose start_pose,geometry_msgs::Pose target_pose)
 {
     //步骤1： 原地转到特定距离
@@ -477,11 +565,17 @@ bool RobotControl::run_straight_line(geometry_msgs::Pose start_pose,geometry_msg
     return true;
 }
 
+/*
+*作用：获取机器人当前状态
+*/
 int  RobotControl::getRobotState()
 {
     return robot_state;
 }
 
+/*
+*作用：获取机器人当前陀螺仪的值
+*/
 float RobotControl::getCurrentImuAngle()
 {
     return current_robot_angel;
